@@ -7,27 +7,39 @@ from EzIO import *
 from random import shuffle
 from functools import cmp_to_key
 
+class EmptyWishlistException(Exception):
+	"""Raised when a wishlist has no items"""
+
 # Solution taken from here:
 # https://stackoverflow.com/a/59439726
 def GetWishlistUrl(username):
-	url = f'https://store.steampowered.com/wishlist/id/{username}'
-	return json.loads(re.findall(r'g_strWishlistBaseURL = (".*?");', requests.get(url).text)[0])
+	doc = requests.get(f'https://store.steampowered.com/wishlist/id/{username}').text
+
+	if re.findall(r'g_rgWishlistData = \[(.*?)\];', doc)[0] == "":
+		raise EmptyWishlistException()
+
+	return json.loads(re.findall(r'g_strWishlistBaseURL = (".*?");', doc)[0])
 
 def TryGetUrl(username):
 	while True:
 		try:
 			return GetWishlistUrl(username)
 
+		except EmptyWishlistException:
+			print("Sorry, this wishlist is empty or private.")
+
 		except:
 			print("Sorry, I couldn't find your wishlist.")
-			username = input()
-			print()
 
-			if username in ['','exit','quit']:
-				print('See ya.')
-				quit()
+		username = input()
+		print()
+
+		if username in ['','exit','quit']:
+			print('See ya.')
+			exit()
 
 url = TryGetUrl(Ask('What is your steam username?'))
+
 sorting  = Ask(
 	'Start by sorting randomly, by player score, or by your ranking? (This affects the order questions are asked)',
 	{
@@ -41,24 +53,30 @@ exc_soon = AskBool('Exclude unreleased games?')
 p = 0
 data = {}
 while True:
+	# Read different pages until no more data is encountered
 	new_data = requests.get(url + 'wishlistdata/?p={p}}').json()
+	print(f"Fetching wishlist data from '{url}wishlistdata/?p={p}'...")
+	print()
 	
 	keys = list(new_data.keys())
 	for n in keys:
 		if n in data:
-			new_data.pop(n)
+			new_data.pop(n) # Avoid listing the same game twice
 
-	if not new_data:
+	if not new_data: # All games on this page were duplicates, or there were no games
 		break
 
 	data = data | new_data
 	p += 1
 
-if len(data.keys() < 2):
+if len(data.keys()) < 2:
 	if len(data.keys()) == 0:
 		print("You don't have any games to sort.")
-	else:
-		print("You can't sort one game.")
+	if len(data.keys()) == 1:
+		if "success" in data.keys() and data["success"] == 2: # When a wishlist is inaccessible it will return json that only contains "success = 2". This should be caught when getting the url but just in case...
+			print("Could not access your wishlist. Is it set to private?")
+		else:
+			print("You only have one game in your wishlist.")
 	exit()
 
 # Always sort by ranking initially, so that the proper order is implied if unreleased games are filtered out
